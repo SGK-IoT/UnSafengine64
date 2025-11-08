@@ -20,91 +20,36 @@ jobs:
         "WINSDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       shell: powershell
 
-      
     - name: Extract Intel Pin
       run: |
-        Expand-Archive -Path pin.zip -DestinationPath C:\
-        Get-ChildItem C:\ -Directory -Filter "pin-*" | Rename-Item -NewName "pin"
+        mkdir C:\pintool
+        Expand-Archive -Path pin.zip -DestinationPath C:\pintool
+        # (rest of extract steps...)
       shell: powershell
-      
-    - name: Create pintool directory
-      run: mkdir C:\pintool
-      
+
     - name: Build DLL
       run: |
         msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$env:WINSDK Unsafengine64.vcxproj
         Get-ChildItem -Recurse | Where-Object {$_.Name -like "UnSafengine64.dll"}
       shell: powershell
-      
+
     - name: Build CUI
       run: |
         msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$env:WINSDK Unsafengine64CUI.vcxproj
         Get-ChildItem -Recurse | Where-Object {$_.Name -like "UnSafengine64.exe"}
       shell: powershell
-        
+
     - name: List Files
       run: |
-        Write-Host "Current Directory:"
-        Get-Location
-        Write-Host "Files in current directory:"
-        Get-ChildItem -Recurse
-        Write-Host "Files in x64/Release:"
-        Get-ChildItem "x64\Release" -ErrorAction SilentlyContinue
+        Get-ChildItem -Recurse C:\pintool | Select-Object FullName, Length
       shell: powershell
-        
-    - name: Copy Files to pintool directory
+
+    - name: Copy artifacts to pintool
       run: |
-        # 直接检查c:\pintool目录下的DLL
-        if (Test-Path "c:\pintool\UnSafengine64.dll") {
-            Write-Host "DLL found in c:\pintool"
-        } else {
-            Write-Host "DLL not found in c:\pintool, searching recursively..."
-            $dll = Get-ChildItem -Recurse -Filter "UnSafengine64.dll"
-            if ($dll) {
-                Write-Host "DLL found at: $($dll.FullName)"
-                Copy-Item $dll.FullName -Destination "C:\pintool\" -Force
-            } else {
-                Write-Error "DLL not found anywhere"
-                exit 1
-            }
-        }
-        
-        # 同样处理CUI程序
-        $exe = Get-ChildItem -Recurse -Filter "Unsafengine64CUI.exe"
-        if ($exe) {
-            Write-Host "EXE found at: $($exe.FullName)"
-            Copy-Item $exe.FullName -Destination "C:\pintool\UnSafengine64.exe" -Force
-        } else {
-            Write-Error "EXE not found"
-        }
-        
-        # 列出pintool目录内容
-        Write-Host "Contents of C:\pintool:"
-        Get-ChildItem "C:\pintool"
-        
-        Copy-Item "UnSafengine64.cfg" -Destination "C:\pintool\" -ErrorAction SilentlyContinue
-        
-        # 复制需要解包的文件到 pintool 目录
-        Copy-Item "Skin_Injector.exe" -Destination "C:\pintool\" -Force
+        Copy-Item -Path "$(Get-ChildItem -Recurse | Where-Object {$_.Name -like 'UnSafengine64.dll'} | Select-Object -First 1).FullName" -Destination C:\pintool -Force
+        Copy-Item -Path "$(Get-ChildItem -Recurse | Where-Object {$_.Name -like 'UnSafengine64.exe'} | Select-Object -First 1).FullName" -Destination C:\pintool -Force
       shell: powershell
-        
-    - name: Unpack Test File
-      run: |
-        cd C:\pintool
-        .\UnSafengine64.exe -deob .\Skin_Injector.exe
-      shell: powershell
-      
-    - name: Upload unpacked file
-      uses: actions/upload-artifact@v4
-      with:
-        name: unpacked-files
-        path: |
-          C:\pintool\*_unpacked.exe
-          C:\pintool\*_dmp.exe
-          C:\pintool\*.log
-          C:\pintool\Skin_Injector_unpacked.exe
-          C:\pintool\Skin_Injector_dmp.exe
-        
+
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
