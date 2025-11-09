@@ -50,21 +50,21 @@ jobs:
         mkdir C:\pintool -ErrorAction SilentlyContinue
         Expand-Archive -Path pin.zip -DestinationPath C:\pintool -Force
 
-    - name: Build (capture MSBuild logs)
-      shell: powershell
-      run: |
-        $sdk = $env:WINSDK
-        $logDir = "$PWD\msbuild_logs"
-        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-        if ($sdk -and $sdk.Trim().Length -gt 0) {
-          Write-Host "Building using WindowsTargetPlatformVersion=$sdk"
-          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64.log;Verbosity=normal
-          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64CUI.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64CUI.log;Verbosity=normal
-        } else {
-          Write-Host "No SDK specified — attempting build without WindowsTargetPlatformVersion"
-          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64.log;Verbosity=normal
-          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64CUI.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64CUI.log;Verbosity=normal
-        }
+- name: Build projects
+  shell: pwsh
+  run: |
+    $sdk = $env:WINSDK
+    $logDir = "$PWD\msbuild_logs"
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    if ($sdk -and $sdk.Trim().Length -gt 0) {
+      Write-Host "Building using WindowsTargetPlatformVersion=$sdk"
+      msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64.log;Verbosity=normal
+      msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64CUI.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64CUI.log;Verbosity=normal
+    } else {
+      Write-Host "No SDK specified - attempting build without WindowsTargetPlatformVersion"
+      msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64.log;Verbosity=normal
+      msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64CUI.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64CUI.log;Verbosity=normal
+    }
 
     - name: Show MSBuild logs
       shell: powershell
