@@ -2,23 +2,19 @@
 #define MSVC_COMPAT_H
 
 // MSVC compatibility header for Intel Pin tools
-// Fixes incompatibilities between Pin's Linux-based CRT and MSVC
+// This header must be included BEFORE any Pin headers
 
 #ifdef _MSC_VER
 
-// Disable specific MSVC warnings
-#pragma warning(disable: 4530) // C++ exception handler used, but unwind semantics are not enabled
-#pragma warning(disable: 4577) // 'noexcept' used with no exception handling mode specified
-#pragma warning(disable: 4091) // 'typedef ': ignored on left of '' when no variable is declared
-#pragma warning(disable: 4146) // unary minus operator applied to unsigned type
+// Disable problematic MSVC warnings
+#pragma warning(disable: 4530)
+#pragma warning(disable: 4577)
+#pragma warning(disable: 4091)
+#pragma warning(disable: 4146)
 
-// Include standard Windows headers first
-#include <windows.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-
-// Define GCC-style keywords for MSVC
+// ============================================================================
+// CRITICAL: Define GCC keywords BEFORE Pin headers see them
+// ============================================================================
 #ifndef __signed__
 #define __signed__ signed
 #endif
@@ -31,73 +27,101 @@
 #define __attribute__(x)
 #endif
 
-// Forward declare types that Pin's CRT expects
-#ifndef _WINT_T_DEFINED
+// ============================================================================
+// Pre-declare types that Pin's CRT will try to define incorrectly
+// ============================================================================
+
+// Prevent Pin's CRT from trying to declare these types
 #define _WINT_T_DEFINED
-typedef unsigned int wint_t;
-#endif
-
-#ifndef _WCTYPE_T_DEFINED
-#define _WCTYPE_T_DEFINED
-typedef int wctype_t;
-#endif
-
-#ifndef _WCTRANS_T_DEFINED
+#define _WCTYPE_T_DEFINED  
 #define _WCTRANS_T_DEFINED
-typedef int wctrans_t;
-#endif
-
-#ifndef _DEV_T_DEFINED
 #define _DEV_T_DEFINED
-typedef unsigned long long dev_t;
+
+// Now provide the actual type definitions
+#ifndef _WINT_T
+#define _WINT_T
+typedef unsigned short wint_t;
 #endif
 
-// Standard C library function declarations (prevent Pin CRT from declaring them)
+#ifndef _WCTYPE_T
+#define _WCTYPE_T
+typedef unsigned short wctype_t;
+#endif
+
+#ifndef _WCTRANS_T
+#define _WCTRANS_T
+typedef unsigned short wctrans_t;
+#endif
+
+#ifndef _DEV_T
+#define _DEV_T
+typedef unsigned int dev_t;
+#endif
+
+// ============================================================================
+// Forward declare FILE type (don't include stdio.h yet)
+// ============================================================================
+#ifndef _FILE_DEFINED
+#define _FILE_DEFINED
+struct _iobuf;
+typedef struct _iobuf FILE;
+#endif
+
+// ============================================================================
+// Declare standard C library functions BEFORE Pin's CRT tries to
+// ============================================================================
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Character classification functions
-_Check_return_ int __cdecl isalnum(_In_ int _C);
-_Check_return_ int __cdecl isalpha(_In_ int _C);
-_Check_return_ int __cdecl iscntrl(_In_ int _C);
-_Check_return_ int __cdecl isdigit(_In_ int _C);
-_Check_return_ int __cdecl isgraph(_In_ int _C);
-_Check_return_ int __cdecl islower(_In_ int _C);
-_Check_return_ int __cdecl isprint(_In_ int _C);
-_Check_return_ int __cdecl ispunct(_In_ int _C);
-_Check_return_ int __cdecl isspace(_In_ int _C);
-_Check_return_ int __cdecl isupper(_In_ int _C);
-_Check_return_ int __cdecl isxdigit(_In_ int _C);
-_Check_return_ int __cdecl tolower(_In_ int _C);
-_Check_return_ int __cdecl toupper(_In_ int _C);
+// Character classification - use __cdecl calling convention
+int __cdecl isalnum(int);
+int __cdecl isalpha(int);
+int __cdecl iscntrl(int);
+int __cdecl isdigit(int);
+int __cdecl isgraph(int);
+int __cdecl islower(int);
+int __cdecl isprint(int);
+int __cdecl ispunct(int);
+int __cdecl isspace(int);
+int __cdecl isupper(int);
+int __cdecl isxdigit(int);
+int __cdecl tolower(int);
+int __cdecl toupper(int);
 
 // Wide character functions
-_Check_return_ wint_t __cdecl btowc(_In_ int _C);
-_Check_return_ wint_t __cdecl fgetwc(_Inout_ FILE* _Stream);
-_Check_return_ wint_t __cdecl fputwc(_In_ wint_t _C, _Inout_ FILE* _Stream);
-_Check_return_ wint_t __cdecl getwc(_Inout_ FILE* _Stream);
-_Check_return_ wint_t __cdecl getwchar(void);
-_Check_return_ wint_t __cdecl putwc(_In_ wint_t _C, _Inout_ FILE* _Stream);
-_Check_return_ wint_t __cdecl putwchar(_In_ wint_t _C);
-_Check_return_ wint_t __cdecl towlower(_In_ wint_t _C);
-_Check_return_ wint_t __cdecl towupper(_In_ wint_t _C);
-_Check_return_ wint_t __cdecl ungetwc(_In_ wint_t _C, _Inout_ FILE* _Stream);
-_Check_return_ wint_t __cdecl towctrans(_In_ wint_t _C, _In_ wctrans_t _Trans);
+wint_t __cdecl btowc(int);
+wint_t __cdecl fgetwc(FILE*);
+wint_t __cdecl fputwc(wint_t, FILE*);
+wint_t __cdecl getwc(FILE*);
+wint_t __cdecl getwchar(void);
+wint_t __cdecl putwc(wint_t, FILE*);
+wint_t __cdecl putwchar(wint_t);
+wint_t __cdecl towlower(wint_t);
+wint_t __cdecl towupper(wint_t);
+wint_t __cdecl ungetwc(wint_t, FILE*);
+wint_t __cdecl towctrans(wint_t, wctrans_t);
 
 #ifdef __cplusplus
 }
 #endif
 
-// Prevent Pin's STLport from trying to use problematic features
+// ============================================================================
+// Prevent Pin's STLport from trying to use broken features
+// ============================================================================
 #define _STLP_NO_WCHAR_T
 #define _STLP_NO_NATIVE_WIDE_STREAMS
-#define _STLP_USE_MSVC_CTYPE
+#define _STLP_USE_NO_IOSTREAMS
 
-// Make sure std:: namespace has these functions available
+// Tell Pin's CRT we already have these functions
+#define _CTYPE_DEFINED
+#define _WCTYPE_INLINE_DEFINED
+
+// ============================================================================
+// Ensure std:: namespace has access to these functions
+// ============================================================================
+#ifdef __cplusplus
 namespace std {
-    using ::tolower;
-    using ::toupper;
     using ::isalnum;
     using ::isalpha;
     using ::iscntrl;
@@ -109,11 +133,10 @@ namespace std {
     using ::isspace;
     using ::isupper;
     using ::isxdigit;
+    using ::tolower;
+    using ::toupper;
 }
-
-// Additional compatibility macros for Pin CRT headers
-#define WINT_MIN 0
-#define WINT_MAX ((wint_t)-1)
+#endif
 
 #endif // _MSC_VER
 #endif // MSVC_COMPAT_H
