@@ -84,16 +84,21 @@ jobs:
         Write-Host "Contents of C:\pin_temp:"
         Get-ChildItem $tempExtract | Select-Object Name, @{Name="Type";Expression={if($_.PSIsContainer){"Directory"}else{"File"}}} | Format-Table
         
-        # Check if extraction created a subdirectory (common with archives)
-        $subDirs = Get-ChildItem $tempExtract -Directory
-        if ($subDirs.Count -eq 1) {
-          Write-Host ""
-          Write-Host "Pin extracted to subdirectory: $($subDirs[0].Name)"
-          Write-Host "Moving contents from $($subDirs[0].FullName) to C:\pin"
-          Move-Item -Path $subDirs[0].FullName -Destination "C:\pin" -Force
+        # Find the actual Pin directory (the one containing 'source' and 'extras')
+        Write-Host ""
+        Write-Host "Looking for Pin SDK directory (contains source/extras)..."
+        $pinDir = Get-ChildItem $tempExtract -Directory | Where-Object {
+          (Test-Path (Join-Path $_.FullName "source")) -or 
+          (Test-Path (Join-Path $_.FullName "extras"))
+        } | Select-Object -First 1
+        
+        if ($pinDir) {
+          Write-Host "[OK] Found Pin SDK directory: $($pinDir.Name)"
+          Write-Host "Moving $($pinDir.FullName) to C:\pin"
+          Move-Item -Path $pinDir.FullName -Destination "C:\pin" -Force
         } else {
-          Write-Host ""
-          Write-Host "Pin extracted directly to temp directory, moving to C:\pin"
+          Write-Host "[WARNING] Could not find Pin SDK directory with source/extras"
+          Write-Host "Attempting to use entire temp directory..."
           Move-Item -Path $tempExtract -Destination "C:\pin" -Force
         }
         
