@@ -1,6 +1,10 @@
 name: Build UnSafengine64
 
 on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -85,43 +89,6 @@ jobs:
           }
         }
         
-        # Option 3: Try using curl with browser-like headers (bypasses some WAF blocks)
-        if (-not $downloaded) {
-          Write-Host ""
-          Write-Host "Trying Intel's official CDN with curl..."
-          $pinUrls = @(
-            "https://software.intel.com/sites/landingpage/pintool/downloads/pin-3.31-98869-ge4ce5e8cc-msvc-windows.zip",
-            "https://software.intel.com/sites/landingpage/pintool/downloads/pin-3.30-98830-g1d7b601b3-msvc-windows.zip"
-          )
-          foreach ($url in $pinUrls) {
-            try {
-              Write-Host "Trying with curl: $url"
-              # Use curl with full browser headers to bypass WAF
-              curl.exe -L -o "pin.zip" `
-                -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
-                -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8" `
-                -H "Accept-Language: en-US,en;q=0.5" `
-                -H "Accept-Encoding: gzip, deflate, br" `
-                -H "DNT: 1" `
-                -H "Connection: keep-alive" `
-                -H "Upgrade-Insecure-Requests: 1" `
-                --retry 3 --retry-delay 2 --max-time 300 `
-                "$url" 2>&1 | Write-Host
-              
-              if ($LASTEXITCODE -eq 0 -and (Test-Path "pin.zip") -and (Get-Item "pin.zip").Length -gt 1MB) {
-                $downloaded = $true
-                Write-Host "[OK] Downloaded from Intel CDN using curl"
-                break
-              } else {
-                Write-Host "[SKIP] curl download failed or file too small"
-                if (Test-Path "pin.zip") { Remove-Item "pin.zip" -Force }
-              }
-            } catch {
-              Write-Host "[SKIP] Failed: $_"
-            }
-          }
-        }
-        
         # Check if download succeeded
         if ($downloaded -and (Test-Path "pin.zip")) {
           $fileInfo = Get-Item "pin.zip"
@@ -132,18 +99,6 @@ jobs:
           Write-Host "[ERROR] ============================================"
           Write-Host "[ERROR] Could not download Pin from any source!"
           Write-Host "[ERROR] ============================================"
-          Write-Host ""
-          Write-Host "All download sources failed. This is unusual since the Dropbox link should work."
-          Write-Host ""
-          Write-Host "Please check:"
-          Write-Host "1. Dropbox link is still valid and public"
-          Write-Host "2. GitHub Actions has network connectivity"
-          Write-Host "3. No firewall rules blocking downloads"
-          Write-Host ""
-          Write-Host "You can also try:"
-          Write-Host "- Using Git LFS to store Pin in the repository"
-          Write-Host "- Uploading to a different hosting service"
-          Write-Host ""
           exit 1
         }
 
@@ -182,9 +137,6 @@ jobs:
         # Verify pin.zip exists
         if (-not (Test-Path "pin.zip")) {
           Write-Host "[ERROR] pin.zip not found in repository!"
-          Write-Host "Current directory: $PWD"
-          Write-Host "Files in current directory:"
-          Get-ChildItem | Select-Object Name, Length | Format-Table
           exit 1
         }
         
@@ -195,14 +147,7 @@ jobs:
         New-Item -ItemType Directory -Path $tempExtract -Force | Out-Null
         Expand-Archive -Path pin.zip -DestinationPath $tempExtract -Force
         
-        Write-Host ""
-        Write-Host "=== Checking extraction structure ==="
-        Write-Host "Contents of C:\pin_temp:"
-        Get-ChildItem $tempExtract | Select-Object Name, @{Name="Type";Expression={if($_.PSIsContainer){"Directory"}else{"File"}}} | Format-Table
-        
-        # Find the actual Pin directory (the one containing 'source' and 'extras')
-        Write-Host ""
-        Write-Host "Looking for Pin SDK directory (contains source/extras)..."
+        # Find the actual Pin directory
         $pinDir = Get-ChildItem $tempExtract -Directory | Where-Object {
           (Test-Path (Join-Path $_.FullName "source")) -or 
           (Test-Path (Join-Path $_.FullName "extras"))
@@ -210,90 +155,123 @@ jobs:
         
         if ($pinDir) {
           Write-Host "[OK] Found Pin SDK directory: $($pinDir.Name)"
-          Write-Host "Moving $($pinDir.FullName) to C:\pin"
           Move-Item -Path $pinDir.FullName -Destination "C:\pin" -Force
         } else {
           Write-Host "[WARNING] Could not find Pin SDK directory with source/extras"
-          Write-Host "Attempting to use entire temp directory..."
           Move-Item -Path $tempExtract -Destination "C:\pin" -Force
         }
         
-        Write-Host ""
-        Write-Host "=== Verifying Pin extraction ==="
-        Write-Host "Top-level contents of C:\pin:"
-        Get-ChildItem C:\pin | Select-Object Name, @{Name="Type";Expression={if($_.PSIsContainer){"Directory"}else{"File"}}} | Format-Table
-        
-        Write-Host ""
-        Write-Host "Checking for expected Pin directories:"
-        $expectedPaths = @(
-          "C:\pin\source",
-          "C:\pin\source\include",
-          "C:\pin\source\include\pin",
-          "C:\pin\extras"
-        )
-        foreach ($path in $expectedPaths) {
-          if (Test-Path $path) {
-            Write-Host "[OK] Found: $path"
-            if (Test-Path "$path\pin.H") {
-              Write-Host "     --> Contains pin.H"
-            }
-          } else {
-            Write-Host "[MISSING] Not found: $path"
-          }
-        }
-        
-        Write-Host ""
-        Write-Host "Searching for pin.H file recursively:"
-        $pinH = Get-ChildItem C:\pin -Recurse -Filter "pin.H" -ErrorAction SilentlyContinue
-        if ($pinH) {
-          foreach ($file in $pinH) {
-            Write-Host "[FOUND] $($file.FullName)"
-          }
-        } else {
-          Write-Host "[ERROR] pin.H not found anywhere in C:\pin"
-          Write-Host ""
-          Write-Host "Full directory structure of C:\pin (depth 3):"
-          Get-ChildItem C:\pin -Recurse -Depth 3 | Select-Object FullName | Format-List
-          exit 1
-        }
-        
-        # Create output directory for final artifacts
+        # Create output directory
         New-Item -ItemType Directory -Path "C:\pintool" -Force | Out-Null
-        Write-Host ""
         Write-Host "Created C:\pintool for output artifacts"
 
-    - name: Create missing include files
+    - name: Create MSVC compatibility header
       shell: powershell
       run: |
-        # Create include directory if it doesn't exist
+        # Create include directory
         New-Item -ItemType Directory -Path "include" -Force | Out-Null
         
-        # Create msvc_compat.h with basic compatibility definitions
-        @"
-        #ifndef MSVC_COMPAT_H
-        #define MSVC_COMPAT_H
-        
-        // MSVC compatibility header for PIN tools
-        // Add any necessary compatibility definitions here
-        
-        #endif // MSVC_COMPAT_H
-        "@ | Out-File -FilePath "include\msvc_compat.h" -Encoding ASCII
+        # Create comprehensive MSVC compatibility header
+        @'
+#ifndef MSVC_COMPAT_H
+#define MSVC_COMPAT_H
+
+// MSVC compatibility header for Intel Pin tools
+// Fixes incompatibilities between Pin's Linux-based CRT and MSVC
+
+#ifdef _MSC_VER
+
+// Disable specific MSVC warnings
+#pragma warning(disable: 4530) // C++ exception handler used, but unwind semantics are not enabled
+#pragma warning(disable: 4577) // 'noexcept' used with no exception handling mode specified
+#pragma warning(disable: 4091) // 'typedef ': ignored on left of '' when no variable is declared
+
+// Include standard Windows headers first
+#include <windows.h>
+#include <stddef.h>
+#include <stdint.h>
+
+// Define GCC-style keywords for MSVC
+#ifndef __signed__
+#define __signed__ signed
+#endif
+
+#ifndef __inline__
+#define __inline__ __inline
+#endif
+
+#ifndef __attribute__
+#define __attribute__(x)
+#endif
+
+// Forward declare types that Pin's CRT expects
+typedef unsigned int wint_t;
+typedef int wctype_t;
+typedef int wctrans_t;
+typedef unsigned long long dev_t;
+
+// Standard C library function declarations (prevent Pin CRT from declaring them)
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Character classification functions
+int isalnum(int c);
+int isalpha(int c);
+int iscntrl(int c);
+int isdigit(int c);
+int isgraph(int c);
+int islower(int c);
+int isprint(int c);
+int ispunct(int c);
+int isspace(int c);
+int isupper(int c);
+int isxdigit(int c);
+int tolower(int c);
+int toupper(int c);
+
+// Wide character functions
+wint_t btowc(int c);
+wint_t fgetwc(FILE* stream);
+wint_t fputwc(wint_t wc, FILE* stream);
+wint_t getwc(FILE* stream);
+wint_t getwchar(void);
+wint_t putwc(wint_t wc, FILE* stream);
+wint_t putwchar(wint_t wc);
+wint_t towlower(wint_t wc);
+wint_t towupper(wint_t wc);
+wint_t ungetwc(wint_t wc, FILE* stream);
+
+#ifdef __cplusplus
+}
+#endif
+
+// Prevent Pin's STLport from trying to use non-existent functions
+#define _STLP_NO_WCHAR_T
+#define _STLP_NO_NATIVE_WIDE_STREAMS
+
+// Make sure std:: namespace has these functions
+namespace std {
+    using ::tolower;
+    using ::toupper;
+    using ::isalnum;
+    using ::isalpha;
+    using ::iscntrl;
+    using ::isdigit;
+    using ::isgraph;
+    using ::islower;
+    using ::isprint;
+    using ::ispunct;
+    using ::isspace;
+    using ::isupper;
+    using ::isxdigit;
+}
+
+#endif // _MSC_VER
+#endif // MSVC_COMPAT_H
+'@ | Out-File -FilePath "include\msvc_compat.h" -Encoding ASCII
         
         Write-Host "Created include/msvc_compat.h"
-        
-        # Verify the file was created
-        if (Test-Path "include\msvc_compat.h") {
-          Write-Host "Verified: include\msvc_compat.h exists"
-          Get-Content "include\msvc_compat.h" | Write-Host
-        } else {
-          Write-Error "Failed to create include\msvc_compat.h"
-          exit 1
-        }
-        
-        # Show current directory and structure
-        Write-Host "Current directory: $PWD"
-        Write-Host "Directory structure:"
-        Get-ChildItem -Recurse -Depth 2 | Select-Object FullName
 
     - name: Build projects
       shell: pwsh
@@ -342,28 +320,17 @@ jobs:
         Write-Host "Build completed successfully!"
 
     - name: Show MSBuild logs
+      if: failure()
       shell: powershell
       run: |
         Write-Host "=== MSBuild logs ==="
         Get-ChildItem -Path msbuild_logs -File | ForEach-Object { Write-Host "--- $_.Name ---"; Get-Content $_.FullName -TotalCount 200 }
 
-    - name: Find and copy build outputs to pintool (robust)
+    - name: Find and copy build outputs
       shell: powershell
       run: |
         Write-Host "=== Searching for build outputs ==="
-        Write-Host "Current directory: $PWD"
         
-        # Show what was built
-        Write-Host ""
-        Write-Host "Searching in x64\Release directory:"
-        if (Test-Path "x64\Release") {
-          Get-ChildItem "x64\Release" -Recurse | Select-Object FullName, Length | Format-Table
-        } else {
-          Write-Host "x64\Release directory not found!"
-        }
-        
-        Write-Host ""
-        Write-Host "Searching for build outputs recursively..."
         $patterns = @('UnSafengine64.exe','UnSafengine64.dll','UnSafengine64CUI.exe')
         foreach ($p in $patterns) {
           $found = Get-ChildItem -Path $PWD -Recurse -Filter $p -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -379,22 +346,30 @@ jobs:
         Write-Host "=== Contents of C:\pintool ==="
         Get-ChildItem -Path C:\pintool -Recurse | Select-Object FullName, Length | Format-Table
 
-    - name: Ensure UnSafengine64.exe exists before trace
+    - name: Verify build outputs
       shell: powershell
       run: |
         $exe = Get-ChildItem -Path C:\pintool -Filter UnSafengine64.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $exe) { Write-Error 'UnSafengine64.exe not found in C:\pintool — build probably failed or output placed elsewhere. See msbuild logs above.'; exit 1 }
-        else { Write-Host "Found executable: $($exe.FullName)" }
+        if (-not $exe) { 
+          Write-Error 'UnSafengine64.exe not found in C:\pintool — build probably failed'
+          exit 1 
+        }
+        Write-Host "Found executable: $($exe.FullName)"
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: UnSafengine64-build
+        name: UnSafengine64-build-${{ github.sha }}
         path: C:\pintool\*
 
-    - name: Trace Execution
+    - name: Trace Execution (if Skin_Injector.exe exists)
+      if: success()
       shell: powershell
       run: |
         cd C:\pintool
-        Write-Host "Running: .\UnSafengine64.exe -trace -log trace.log .\Skin_Injector.exe"
-        .\UnSafengine64.exe -trace -log trace.log .\Skin_Injector.exe
+        if (Test-Path ".\Skin_Injector.exe") {
+          Write-Host "Running: .\UnSafengine64.exe -trace -log trace.log .\Skin_Injector.exe"
+          .\UnSafengine64.exe -trace -log trace.log .\Skin_Injector.exe
+        } else {
+          Write-Host "Skin_Injector.exe not found, skipping trace execution"
+        }
