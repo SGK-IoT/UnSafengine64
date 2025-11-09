@@ -47,8 +47,34 @@ jobs:
     - name: Extract Intel Pin
       shell: powershell
       run: |
-        mkdir C:\pintool -ErrorAction SilentlyContinue
-        Expand-Archive -Path pin.zip -DestinationPath C:\pintool -Force
+        Write-Host "Extracting pin.zip..."
+        $tempExtract = "C:\pin_temp"
+        New-Item -ItemType Directory -Path $tempExtract -Force | Out-Null
+        Expand-Archive -Path pin.zip -DestinationPath $tempExtract -Force
+        
+        # Check if extraction created a subdirectory (common with archives)
+        $subDirs = Get-ChildItem $tempExtract -Directory
+        if ($subDirs.Count -eq 1) {
+          Write-Host "Pin extracted to subdirectory: $($subDirs[0].Name)"
+          Write-Host "Moving contents from $($subDirs[0].FullName) to C:\pin"
+          Move-Item -Path $subDirs[0].FullName -Destination "C:\pin" -Force
+        } else {
+          Write-Host "Pin extracted to temp directory, moving to C:\pin"
+          Move-Item -Path $tempExtract -Destination "C:\pin" -Force
+        }
+        
+        Write-Host "`nVerifying Pin extraction..."
+        if (Test-Path "C:\pin\source\include\pin") {
+          Write-Host "✓ SUCCESS: Pin headers found at C:\pin\source\include\pin"
+        } else {
+          Write-Host "✗ WARNING: Pin headers not found at expected location"
+          Write-Host "Contents of C:\pin:"
+          Get-ChildItem C:\pin -Recurse -Depth 2 | Select-Object FullName | Format-List
+        }
+        
+        # Create output directory for final artifacts
+        New-Item -ItemType Directory -Path "C:\pintool" -Force | Out-Null
+        Write-Host "`nCreated C:\pintool for output artifacts"
 
     - name: Create missing include files
       shell: powershell
@@ -68,22 +94,66 @@ jobs:
         "@ | Out-File -FilePath "include\msvc_compat.h" -Encoding ASCII
         
         Write-Host "Created include/msvc_compat.h"
+        
+        # Verify the file was created
+        if (Test-Path "include\msvc_compat.h") {
+          Write-Host "Verified: include\msvc_compat.h exists"
+          Get-Content "include\msvc_compat.h" | Write-Host
+        } else {
+          Write-Error "Failed to create include\msvc_compat.h"
+          exit 1
+        }
+        
+        # Show current directory and structure
+        Write-Host "Current directory: $PWD"
+        Write-Host "Directory structure:"
+        Get-ChildItem -Recurse -Depth 2 | Select-Object FullName
 
     - name: Build projects
       shell: pwsh
       run: |
+        $ErrorActionPreference = "Continue"
         $sdk = $env:WINSDK
         $logDir = "$PWD\msbuild_logs"
         New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        
         if ($sdk -and $sdk.Trim().Length -gt 0) {
           Write-Host "Building using WindowsTargetPlatformVersion=$sdk"
-          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64.vcxproj "/fileloggerparameters:LogFile=$logDir\Unsafengine64.log`;Verbosity=normal"
-          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64CUI.vcxproj "/fileloggerparameters:LogFile=$logDir\Unsafengine64CUI.log`;Verbosity=normal"
+          Write-Host "Building Unsafengine64.vcxproj..."
+          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64.vcxproj "/flp:LogFile=$logDir\Unsafengine64.log;Verbosity=normal"
+          if ($LASTEXITCODE -ne 0) { 
+            Write-Host "ERROR: Unsafengine64.vcxproj build failed with exit code $LASTEXITCODE"
+            Get-Content "$logDir\Unsafengine64.log" -ErrorAction SilentlyContinue | Select-Object -Last 50
+            exit 1
+          }
+          
+          Write-Host "Building Unsafengine64CUI.vcxproj..."
+          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64CUI.vcxproj "/flp:LogFile=$logDir\Unsafengine64CUI.log;Verbosity=normal"
+          if ($LASTEXITCODE -ne 0) { 
+            Write-Host "ERROR: Unsafengine64CUI.vcxproj build failed with exit code $LASTEXITCODE"
+            Get-Content "$logDir\Unsafengine64CUI.log" -ErrorAction SilentlyContinue | Select-Object -Last 50
+            exit 1
+          }
         } else {
           Write-Host "No SDK specified - attempting build without WindowsTargetPlatformVersion"
-          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64.vcxproj "/fileloggerparameters:LogFile=$logDir\Unsafengine64.log`;Verbosity=normal"
-          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64CUI.vcxproj "/fileloggerparameters:LogFile=$logDir\Unsafengine64CUI.log`;Verbosity=normal"
+          Write-Host "Building Unsafengine64.vcxproj..."
+          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64.vcxproj "/flp:LogFile=$logDir\Unsafengine64.log;Verbosity=normal"
+          if ($LASTEXITCODE -ne 0) { 
+            Write-Host "ERROR: Unsafengine64.vcxproj build failed with exit code $LASTEXITCODE"
+            Get-Content "$logDir\Unsafengine64.log" -ErrorAction SilentlyContinue | Select-Object -Last 50
+            exit 1
+          }
+          
+          Write-Host "Building Unsafengine64CUI.vcxproj..."
+          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64CUI.vcxproj "/flp:LogFile=$logDir\Unsafengine64CUI.log;Verbosity=normal"
+          if ($LASTEXITCODE -ne 0) { 
+            Write-Host "ERROR: Unsafengine64CUI.vcxproj build failed with exit code $LASTEXITCODE"
+            Get-Content "$logDir\Unsafengine64CUI.log" -ErrorAction SilentlyContinue | Select-Object -Last 50
+            exit 1
+          }
         }
+        
+        Write-Host "Build completed successfully!"
 
     - name: Show MSBuild logs
       shell: powershell
@@ -94,14 +164,31 @@ jobs:
     - name: Find and copy build outputs to pintool (robust)
       shell: powershell
       run: |
-        Write-Host "Searching for build outputs..."
-        $patterns = @('UnSafengine64.exe','UnSafengine64.dll')
+        Write-Host "=== Searching for build outputs ==="
+        Write-Host "Current directory: $PWD"
+        
+        # Show what was built
+        Write-Host "`nSearching in x64\Release directory:"
+        if (Test-Path "x64\Release") {
+          Get-ChildItem "x64\Release" -Recurse | Select-Object FullName, Length | Format-Table
+        } else {
+          Write-Host "x64\Release directory not found!"
+        }
+        
+        Write-Host "`nSearching for build outputs recursively..."
+        $patterns = @('UnSafengine64.exe','UnSafengine64.dll','UnSafengine64CUI.exe')
         foreach ($p in $patterns) {
           $found = Get-ChildItem -Path $PWD -Recurse -Filter $p -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($found) { Copy-Item -Path $found.FullName -Destination C:\pintool -Force; Write-Host "Copied $($found.FullName) to C:\pintool" }
-          else { Write-Host "Not found: $p" }
+          if ($found) { 
+            Copy-Item -Path $found.FullName -Destination C:\pintool -Force
+            Write-Host "✓ Copied $($found.FullName) to C:\pintool"
+          } else { 
+            Write-Host "✗ Not found: $p" 
+          }
         }
-        Write-Host "Contents of C:\pintool:"; Get-ChildItem -Path C:\pintool -Recurse | Select-Object FullName, Length
+        
+        Write-Host "`n=== Contents of C:\pintool ==="
+        Get-ChildItem -Path C:\pintool -Recurse | Select-Object FullName, Length | Format-Table
 
     - name: Ensure UnSafengine64.exe exists before trace
       shell: powershell
