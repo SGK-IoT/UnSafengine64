@@ -2,58 +2,99 @@
 #define MSVC_COMPAT_H
 
 // MSVC compatibility header for Intel Pin tools
-// This header resolves conflicts between Pin's Linux CRT and Windows MSVC
+// Fixes incompatibilities between Pin's Linux-based CRT and MSVC
 
-// ============================================================================
-// 1. Prevent Pin's CRT from redefining standard types
-// ============================================================================
+#ifdef _MSC_VER
 
-// Define these BEFORE Pin's headers try to define them
-#ifndef _WCHAR_T_DEFINED
-#define _WCHAR_T_DEFINED
-#endif
+// Disable specific MSVC warnings
+#pragma warning(disable: 4530) // C++ exception handler used, but unwind semantics are not enabled
+#pragma warning(disable: 4577) // 'noexcept' used with no exception handling mode specified
+#pragma warning(disable: 4091) // 'typedef ': ignored on left of '' when no variable is declared
+#pragma warning(disable: 4146) // unary minus operator applied to unsigned type
 
-#ifndef _WINT_T
-#define _WINT_T
-typedef unsigned short wint_t;
-#endif
+// Include standard Windows headers first
+#include <windows.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
 
-// ============================================================================
-// 2. Fix GCC-specific keywords that MSVC doesn't understand
-// ============================================================================
-
-// Pin's CRT uses GCC-style __signed__ which MSVC doesn't have
+// Define GCC-style keywords for MSVC
 #ifndef __signed__
 #define __signed__ signed
 #endif
 
-// Inline keyword compatibility
 #ifndef __inline__
 #define __inline__ __inline
 #endif
 
-// ============================================================================
-// 3. Provide missing standard library functions
-// ============================================================================
-
-// Include Windows CRT headers BEFORE Pin's headers
-#include <ctype.h>
-#include <wctype.h>
-#include <string.h>
-#include <stdlib.h>
-#include <stdio.h>
-
-// Make sure tolower/toupper are available in global namespace
-#ifndef tolower
-using ::tolower;
-using ::toupper;
+#ifndef __attribute__
+#define __attribute__(x)
 #endif
 
-// ============================================================================
-// 4. Fix Pin's STLport compatibility issues
-// ============================================================================
+// Forward declare types that Pin's CRT expects
+#ifndef _WINT_T_DEFINED
+#define _WINT_T_DEFINED
+typedef unsigned int wint_t;
+#endif
 
-// Ensure these are defined before STLport tries to use them
+#ifndef _WCTYPE_T_DEFINED
+#define _WCTYPE_T_DEFINED
+typedef int wctype_t;
+#endif
+
+#ifndef _WCTRANS_T_DEFINED
+#define _WCTRANS_T_DEFINED
+typedef int wctrans_t;
+#endif
+
+#ifndef _DEV_T_DEFINED
+#define _DEV_T_DEFINED
+typedef unsigned long long dev_t;
+#endif
+
+// Standard C library function declarations (prevent Pin CRT from declaring them)
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Character classification functions
+_Check_return_ int __cdecl isalnum(_In_ int _C);
+_Check_return_ int __cdecl isalpha(_In_ int _C);
+_Check_return_ int __cdecl iscntrl(_In_ int _C);
+_Check_return_ int __cdecl isdigit(_In_ int _C);
+_Check_return_ int __cdecl isgraph(_In_ int _C);
+_Check_return_ int __cdecl islower(_In_ int _C);
+_Check_return_ int __cdecl isprint(_In_ int _C);
+_Check_return_ int __cdecl ispunct(_In_ int _C);
+_Check_return_ int __cdecl isspace(_In_ int _C);
+_Check_return_ int __cdecl isupper(_In_ int _C);
+_Check_return_ int __cdecl isxdigit(_In_ int _C);
+_Check_return_ int __cdecl tolower(_In_ int _C);
+_Check_return_ int __cdecl toupper(_In_ int _C);
+
+// Wide character functions
+_Check_return_ wint_t __cdecl btowc(_In_ int _C);
+_Check_return_ wint_t __cdecl fgetwc(_Inout_ FILE* _Stream);
+_Check_return_ wint_t __cdecl fputwc(_In_ wint_t _C, _Inout_ FILE* _Stream);
+_Check_return_ wint_t __cdecl getwc(_Inout_ FILE* _Stream);
+_Check_return_ wint_t __cdecl getwchar(void);
+_Check_return_ wint_t __cdecl putwc(_In_ wint_t _C, _Inout_ FILE* _Stream);
+_Check_return_ wint_t __cdecl putwchar(_In_ wint_t _C);
+_Check_return_ wint_t __cdecl towlower(_In_ wint_t _C);
+_Check_return_ wint_t __cdecl towupper(_In_ wint_t _C);
+_Check_return_ wint_t __cdecl ungetwc(_In_ wint_t _C, _Inout_ FILE* _Stream);
+_Check_return_ wint_t __cdecl towctrans(_In_ wint_t _C, _In_ wctrans_t _Trans);
+
+#ifdef __cplusplus
+}
+#endif
+
+// Prevent Pin's STLport from trying to use problematic features
+#define _STLP_NO_WCHAR_T
+#define _STLP_NO_NATIVE_WIDE_STREAMS
+#define _STLP_USE_MSVC_CTYPE
+
+// Make sure std:: namespace has these functions available
 namespace std {
     using ::tolower;
     using ::toupper;
@@ -70,36 +111,9 @@ namespace std {
     using ::isxdigit;
 }
 
-// ============================================================================
-// 5. Disable Pin CRT's problematic headers
-// ============================================================================
+// Additional compatibility macros for Pin CRT headers
+#define WINT_MIN 0
+#define WINT_MAX ((wint_t)-1)
 
-// Prevent Pin's wchar.h from being included (use Windows' instead)
-#define _PIN_WCHAR_H_
-#define __PIN_WCHAR_H__
-
-// Prevent Pin's Linux kernel headers from being included
-#define _ASM_GENERIC_INT_LL64_H
-#define _LINUX_TYPES_H
-#define __KERNEL_STRICT_NAMES
-
-// ============================================================================
-// 6. Windows-specific types that Pin expects
-// ============================================================================
-
-#ifndef __dev_t_defined
-#define __dev_t_defined
-typedef unsigned int dev_t;
-#endif
-
-// ============================================================================
-// 7. MSVC pragma helpers
-// ============================================================================
-
-// Disable specific warnings that Pin triggers with MSVC
-#pragma warning(disable: 4530) // C++ exception handler used, but unwind semantics are not enabled
-#pragma warning(disable: 4577) // 'noexcept' used with no exception handling mode specified
-#pragma warning(disable: 4244) // conversion from 'type1' to 'type2', possible loss of data
-#pragma warning(disable: 4267) // conversion from 'size_t' to 'type', possible loss of data
-
+#endif // _MSC_VER
 #endif // MSVC_COMPAT_H
