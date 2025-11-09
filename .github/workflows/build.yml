@@ -50,6 +50,25 @@ jobs:
         mkdir C:\pintool -ErrorAction SilentlyContinue
         Expand-Archive -Path pin.zip -DestinationPath C:\pintool -Force
 
+    - name: Create missing include files
+      shell: powershell
+      run: |
+        # Create include directory if it doesn't exist
+        New-Item -ItemType Directory -Path "include" -Force | Out-Null
+        
+        # Create msvc_compat.h with basic compatibility definitions
+        @"
+        #ifndef MSVC_COMPAT_H
+        #define MSVC_COMPAT_H
+        
+        // MSVC compatibility header for PIN tools
+        // Add any necessary compatibility definitions here
+        
+        #endif // MSVC_COMPAT_H
+        "@ | Out-File -FilePath "include\msvc_compat.h" -Encoding ASCII
+        
+        Write-Host "Created include/msvc_compat.h"
+
     - name: Build projects
       shell: pwsh
       run: |
@@ -58,12 +77,12 @@ jobs:
         New-Item -ItemType Directory -Path $logDir -Force | Out-Null
         if ($sdk -and $sdk.Trim().Length -gt 0) {
           Write-Host "Building using WindowsTargetPlatformVersion=$sdk"
-          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64.log;Verbosity=normal
-          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64CUI.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64CUI.log;Verbosity=normal
+          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64.vcxproj "/fileloggerparameters:LogFile=$logDir\Unsafengine64.log`;Verbosity=normal"
+          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64CUI.vcxproj "/fileloggerparameters:LogFile=$logDir\Unsafengine64CUI.log`;Verbosity=normal"
         } else {
           Write-Host "No SDK specified - attempting build without WindowsTargetPlatformVersion"
-          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64.log;Verbosity=normal
-          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64CUI.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64CUI.log;Verbosity=normal
+          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64.vcxproj "/fileloggerparameters:LogFile=$logDir\Unsafengine64.log`;Verbosity=normal"
+          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64CUI.vcxproj "/fileloggerparameters:LogFile=$logDir\Unsafengine64CUI.log`;Verbosity=normal"
         }
 
     - name: Show MSBuild logs
