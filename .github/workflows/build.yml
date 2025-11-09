@@ -5,12 +5,9 @@ on:
 
 jobs:
   build:
-    # Use a modern Microsoft-hosted Windows image (windows-2025 is available)
     runs-on: windows-2025
 
     env:
-      # Set to 'true' if you want the runner to download & install Windows SDK 10.0.22621.0 if it's missing.
-      # Note: installing the SDK increases job time and requires admin privileges on the runner.
       INSTALL_SDK: 'true'
       TARGET_SDK_VERSION: '10.0.22621.0'
 
@@ -30,21 +27,21 @@ jobs:
           Write-Host "Detected Windows SDK: $sdk"
           "WINSDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
         } else {
-          Write-Host "No Windows 10 SDK found under C:\Program Files (x86)\Windows Kits\10\Include"
+          Write-Host 'No Windows 10 SDK found under C:\Program Files (x86)\Windows Kits\10\Include'
           if ('${{ env.INSTALL_SDK }}' -eq 'true') {
-            Write-Host "INSTALL_SDK is true — attempting to download and install Windows SDK $env:TARGET_SDK_VERSION"
+            Write-Host 'INSTALL_SDK is true — attempting to download and install Windows SDK'
+            Write-Host "Target SDK version: $env:TARGET_SDK_VERSION"
+            # Download and run installer (example bootstrap URL — replace with official installer if desired)
             $installer = "WindowsSDKInstaller.exe"
             $url = "https://download.microsoft.com/download/9/6/6/966E0A2C-7F1F-44B3-8C5A-6F9F8E6A8B4D/WinSDKSetup.exe"
-            # NOTE: URL above is an example bootstrap; change if you prefer an exact URL for 10.0.22621.0
             Invoke-WebRequest -Uri $url -OutFile $installer
-            Write-Host "Running installer (quiet). This may take several minutes..."
-            Start-Process -FilePath .\$installer -ArgumentList "/quiet /norestart" -Wait
-            # After install, try to detect again
+            Start-Process -FilePath .\$installer -ArgumentList '/quiet','/norestart' -Wait
+            # Re-detect SDK
             $sdkEntry2 = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Directory | Sort-Object Name -Descending | Select-Object -First 1
             if ($sdkEntry2) { "WINSDK=$($sdkEntry2.Name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append; Write-Host "Installed and detected SDK: $($sdkEntry2.Name)" }
-            else { Write-Error "SDK installation did not expose an Include folder under the expected path."; exit 1 }
+            else { Write-Error 'SDK installation did not expose an Include folder under the expected path.'; exit 1 }
           } else {
-            Write-Host "INSTALL_SDK is false — build will attempt to run msbuild without specifying WindowsTargetPlatformVersion"
+            Write-Host 'INSTALL_SDK is false — build will attempt to run msbuild without specifying WindowsTargetPlatformVersion'
             "WINSDK=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
         }
@@ -64,7 +61,7 @@ jobs:
           msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64.vcxproj
           msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64CUI.vcxproj
         } else {
-          Write-Host "No SDK specified — attempting build without WindowsTargetPlatformVersion"
+          Write-Host 'No SDK specified - attempting build without WindowsTargetPlatformVersion'
           msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64.vcxproj
           msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64CUI.vcxproj
         }
