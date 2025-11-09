@@ -22,20 +22,97 @@ jobs:
       run: |
         Write-Host "=== Downloading Intel Pin 3.30 (MSVC Compatible) ==="
         
-        $pinUrl = "https://software.intel.com/sites/landingpage/pintool/downloads/pin-3.30-98830-g1d7b601b3-msvc-windows.zip"
-        Write-Host "Downloading from: $pinUrl"
-        Write-Host "This may take a few minutes (40MB download)..."
+        # Try multiple download sources
+        $downloaded = $false
         
+        # Option 1: Try from your GitHub Releases (if you've uploaded it)
+        Write-Host "Checking for Pin in GitHub Releases..."
+        $releaseUrl = "https://github.com/${{ github.repository }}/releases/download/pin-sdk/pin-3.30-msvc-windows.zip"
         try {
-          Invoke-WebRequest -Uri $pinUrl -OutFile "pin.zip" -UseBasicParsing
-          $fileInfo = Get-Item "pin.zip"
-          Write-Host "[OK] Downloaded pin.zip ($([math]::Round($fileInfo.Length/1MB, 2)) MB)"
+          Write-Host "Trying: $releaseUrl"
+          Invoke-WebRequest -Uri $releaseUrl -OutFile "pin.zip" -UseBasicParsing -ErrorAction Stop
+          $downloaded = $true
+          Write-Host "[OK] Downloaded from GitHub Releases"
         } catch {
-          Write-Host "[ERROR] Failed to download Pin: $_"
+          Write-Host "[SKIP] Not found in GitHub Releases"
+        }
+        
+        # Option 2: Try Intel's official GitHub releases (primary source)
+        if (-not $downloaded) {
           Write-Host ""
-          Write-Host "Alternative download locations:"
-          Write-Host "1. https://www.intel.com/content/www/us/en/developer/articles/tool/pin-a-binary-instrumentation-tool-downloads.html"
-          Write-Host "2. Direct: https://software.intel.com/sites/landingpage/pintool/downloads/pin-3.30-98830-g1d7b601b3-msvc-windows.zip"
+          Write-Host "Trying Intel Pin GitHub releases (official)..."
+          $pinUrls = @(
+            "https://github.com/intel/pin/releases/download/pin-3.30-98830/pin-3.30-98830-g1d7b601b3-msvc-windows.zip",
+            "https://github.com/intel/pin/releases/download/pin-3.31-98869/pin-3.31-98869-ge4ce5e8cc-msvc-windows.zip"
+          )
+          foreach ($url in $pinUrls) {
+            try {
+              Write-Host "Trying: $url"
+              Invoke-WebRequest -Uri $url -OutFile "pin.zip" -UseBasicParsing -ErrorAction Stop
+              $downloaded = $true
+              Write-Host "[OK] Downloaded from Intel GitHub"
+              break
+            } catch {
+              Write-Host "[SKIP] Failed: $_"
+            }
+          }
+        }
+        
+        # Option 3: Try direct download with proper headers
+        if (-not $downloaded) {
+          Write-Host ""
+          Write-Host "Trying with alternative request method..."
+          $altUrls = @(
+            "https://downloadmirror.intel.com/813591/pin-3.30-98830-g1d7b601b3-msvc-windows.zip"
+          )
+          foreach ($url in $altUrls) {
+            try {
+              Write-Host "Trying: $url"
+              $headers = @{
+                'User-Agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'Accept' = '*/*'
+              }
+              Invoke-WebRequest -Uri $url -OutFile "pin.zip" -Headers $headers -UseBasicParsing -ErrorAction Stop
+              $downloaded = $true
+              Write-Host "[OK] Downloaded from alternative source"
+              break
+            } catch {
+              Write-Host "[SKIP] Failed: $_"
+            }
+          }
+        }
+        
+        # Check if download succeeded
+        if ($downloaded -and (Test-Path "pin.zip")) {
+          $fileInfo = Get-Item "pin.zip"
+          Write-Host ""
+          Write-Host "[SUCCESS] Downloaded pin.zip ($([math]::Round($fileInfo.Length/1MB, 2)) MB)"
+        } else {
+          Write-Host ""
+          Write-Host "[ERROR] ============================================"
+          Write-Host "[ERROR] Could not download Pin from any source!"
+          Write-Host "[ERROR] ============================================"
+          Write-Host ""
+          Write-Host "SOLUTION: Upload Pin to GitHub Releases or download manually"
+          Write-Host ""
+          Write-Host "Option A - Use Intel's GitHub releases:"
+          Write-Host "1. Download Pin from Intel's official GitHub:"
+          Write-Host "   https://github.com/intel/pin/releases"
+          Write-Host "   Get: pin-3.30-98830-g1d7b601b3-msvc-windows.zip"
+          Write-Host ""
+          Write-Host "Option B - Upload to your GitHub Releases:"
+          Write-Host "1. Download Pin manually from Intel GitHub (see Option A)"
+          Write-Host ""
+          Write-Host "2. Create a GitHub Release:"
+          Write-Host "   - Go to: https://github.com/${{ github.repository }}/releases/new"
+          Write-Host "   - Tag: pin-sdk"
+          Write-Host "   - Title: Intel Pin SDK"
+          Write-Host "   - Upload the downloaded .zip file"
+          Write-Host "   - Rename to: pin-3.30-msvc-windows.zip"
+          Write-Host "   - Publish release"
+          Write-Host ""
+          Write-Host "3. Re-run this workflow"
+          Write-Host ""
           exit 1
         }
 
