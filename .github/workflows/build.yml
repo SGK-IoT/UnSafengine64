@@ -17,6 +17,20 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v1.1
 
+    - name: Download Intel Pin (if not in repo)
+      shell: powershell
+      run: |
+        if (Test-Path "pin.zip") {
+          Write-Host "[OK] pin.zip already exists in repository"
+        } else {
+          Write-Host "[INFO] pin.zip not found in repository, downloading..."
+          # Download Intel Pin - you may need to update this URL to the correct version
+          $pinUrl = "https://software.intel.com/sites/landingpage/pintool/downloads/pin-3.30-98830-g1d7b601b3-msvc-windows.zip"
+          Write-Host "Downloading Pin from: $pinUrl"
+          Invoke-WebRequest -Uri $pinUrl -OutFile "pin.zip" -UseBasicParsing
+          Write-Host "[OK] Downloaded pin.zip ($(Get-Item pin.zip | Select-Object -ExpandProperty Length) bytes)"
+        }
+
     - name: Detect installed Windows 10 SDK
       shell: powershell
       run: |
@@ -47,30 +61,79 @@ jobs:
     - name: Extract Intel Pin
       shell: powershell
       run: |
+        Write-Host "=== Extracting Intel Pin ==="
+        
+        # Verify pin.zip exists
+        if (-not (Test-Path "pin.zip")) {
+          Write-Host "[ERROR] pin.zip not found in repository!"
+          Write-Host "Current directory: $PWD"
+          Write-Host "Files in current directory:"
+          Get-ChildItem | Select-Object Name, Length | Format-Table
+          exit 1
+        }
+        
+        Write-Host "[OK] Found pin.zip ($(Get-Item pin.zip | Select-Object -ExpandProperty Length) bytes)"
+        Write-Host ""
         Write-Host "Extracting pin.zip..."
         $tempExtract = "C:\pin_temp"
         New-Item -ItemType Directory -Path $tempExtract -Force | Out-Null
         Expand-Archive -Path pin.zip -DestinationPath $tempExtract -Force
         
+        Write-Host ""
+        Write-Host "=== Checking extraction structure ==="
+        Write-Host "Contents of C:\pin_temp:"
+        Get-ChildItem $tempExtract | Select-Object Name, @{Name="Type";Expression={if($_.PSIsContainer){"Directory"}else{"File"}}} | Format-Table
+        
         # Check if extraction created a subdirectory (common with archives)
         $subDirs = Get-ChildItem $tempExtract -Directory
         if ($subDirs.Count -eq 1) {
+          Write-Host ""
           Write-Host "Pin extracted to subdirectory: $($subDirs[0].Name)"
           Write-Host "Moving contents from $($subDirs[0].FullName) to C:\pin"
           Move-Item -Path $subDirs[0].FullName -Destination "C:\pin" -Force
         } else {
-          Write-Host "Pin extracted to temp directory, moving to C:\pin"
+          Write-Host ""
+          Write-Host "Pin extracted directly to temp directory, moving to C:\pin"
           Move-Item -Path $tempExtract -Destination "C:\pin" -Force
         }
         
         Write-Host ""
-        Write-Host "Verifying Pin extraction..."
-        if (Test-Path "C:\pin\source\include\pin") {
-          Write-Host "SUCCESS: Pin headers found at C:\pin\source\include\pin"
+        Write-Host "=== Verifying Pin extraction ==="
+        Write-Host "Top-level contents of C:\pin:"
+        Get-ChildItem C:\pin | Select-Object Name, @{Name="Type";Expression={if($_.PSIsContainer){"Directory"}else{"File"}}} | Format-Table
+        
+        Write-Host ""
+        Write-Host "Checking for expected Pin directories:"
+        $expectedPaths = @(
+          "C:\pin\source",
+          "C:\pin\source\include",
+          "C:\pin\source\include\pin",
+          "C:\pin\extras"
+        )
+        foreach ($path in $expectedPaths) {
+          if (Test-Path $path) {
+            Write-Host "[OK] Found: $path"
+            if (Test-Path "$path\pin.H") {
+              Write-Host "     --> Contains pin.H"
+            }
+          } else {
+            Write-Host "[MISSING] Not found: $path"
+          }
+        }
+        
+        Write-Host ""
+        Write-Host "Searching for pin.H file recursively:"
+        $pinH = Get-ChildItem C:\pin -Recurse -Filter "pin.H" -ErrorAction SilentlyContinue
+        if ($pinH) {
+          foreach ($file in $pinH) {
+            Write-Host "[FOUND] $($file.FullName)"
+          }
         } else {
-          Write-Host "WARNING: Pin headers not found at expected location"
-          Write-Host "Contents of C:\pin:"
-          Get-ChildItem C:\pin -Recurse -Depth 2 | Select-Object FullName | Format-List
+          Write-Host "[ERROR] pin.H not found anywhere in C:\pin"
+          Write-Host ""
+          Write-Host "Full directory structure of C:\pin (depth 3):"
+          Get-ChildItem C:\pin -Recurse -Depth 3 | Select-Object FullName | Format-List
+          exit 1
         }
         
         # Create output directory for final artifacts
