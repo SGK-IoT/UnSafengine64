@@ -18,7 +18,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
       with:
-        lfs: true  # Enable Git LFS support
+        lfs: true
 
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v1.1
@@ -28,10 +28,8 @@ jobs:
       run: |
         Write-Host "=== Downloading Intel Pin 3.30 (MSVC Compatible) ==="
         
-        # Try multiple download sources
         $downloaded = $false
         
-        # Option 0: Check if Pin is in the repository (Git LFS)
         Write-Host "Checking for Pin in repository (Git LFS)..."
         $repoFiles = @(
           "pin-3.30-98830-g1d7b601b3-msvc-windows.zip",
@@ -52,7 +50,6 @@ jobs:
           }
         }
         
-        # Option 1: Try from Dropbox (primary source)
         if (-not $downloaded) {
           Write-Host ""
           Write-Host "Downloading from Dropbox..."
@@ -61,7 +58,6 @@ jobs:
             Write-Host "Trying: $dropboxUrl"
             Invoke-WebRequest -Uri $dropboxUrl -OutFile "pin.zip" -UseBasicParsing -ErrorAction Stop
             
-            # Verify download succeeded
             if ((Test-Path "pin.zip") -and (Get-Item "pin.zip").Length -gt 1MB) {
               $downloaded = $true
               Write-Host "[OK] Downloaded from Dropbox"
@@ -74,7 +70,6 @@ jobs:
           }
         }
         
-        # Option 2: Try from GitHub Releases (if you've uploaded it)
         if (-not $downloaded) {
           Write-Host ""
           Write-Host "Checking for Pin in GitHub Releases..."
@@ -89,7 +84,6 @@ jobs:
           }
         }
         
-        # Check if download succeeded
         if ($downloaded -and (Test-Path "pin.zip")) {
           $fileInfo = Get-Item "pin.zip"
           Write-Host ""
@@ -114,17 +108,22 @@ jobs:
         } else {
           Write-Host 'No Windows 10 SDK found under C:\Program Files (x86)\Windows Kits\10\Include'
           if ('${{ env.INSTALL_SDK }}' -eq 'true') {
-            Write-Host 'INSTALL_SDK is true — attempting to download and install Windows SDK'
+            Write-Host 'INSTALL_SDK is true - attempting to download and install Windows SDK'
             Write-Host "Target SDK version: $env:TARGET_SDK_VERSION"
             $installer = "WindowsSDKInstaller.exe"
             $url = "https://download.microsoft.com/download/9/6/6/966E0A2C-7F1F-44B3-8C5A-6F9F8E6A8B4D/WinSDKSetup.exe"
             Invoke-WebRequest -Uri $url -OutFile $installer
             Start-Process -FilePath .\$installer -ArgumentList '/quiet','/norestart' -Wait
             $sdkEntry2 = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Directory | Sort-Object Name -Descending | Select-Object -First 1
-            if ($sdkEntry2) { "WINSDK=$($sdkEntry2.Name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append; Write-Host "Installed and detected SDK: $($sdkEntry2.Name)" }
-            else { Write-Error 'SDK installation did not expose an Include folder under the expected path.'; exit 1 }
+            if ($sdkEntry2) { 
+              "WINSDK=$($sdkEntry2.Name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              Write-Host "Installed and detected SDK: $($sdkEntry2.Name)"
+            } else {
+              Write-Error 'SDK installation did not expose an Include folder under the expected path.'
+              exit 1
+            }
           } else {
-            Write-Host 'INSTALL_SDK is false — build will attempt to run msbuild without specifying WindowsTargetPlatformVersion'
+            Write-Host 'INSTALL_SDK is false - build will attempt to run msbuild without specifying WindowsTargetPlatformVersion'
             "WINSDK=" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
         }
@@ -134,7 +133,6 @@ jobs:
       run: |
         Write-Host "=== Extracting Intel Pin ==="
         
-        # Verify pin.zip exists
         if (-not (Test-Path "pin.zip")) {
           Write-Host "[ERROR] pin.zip not found in repository!"
           exit 1
@@ -147,7 +145,6 @@ jobs:
         New-Item -ItemType Directory -Path $tempExtract -Force | Out-Null
         Expand-Archive -Path pin.zip -DestinationPath $tempExtract -Force
         
-        # Find the actual Pin directory
         $pinDir = Get-ChildItem $tempExtract -Directory | Where-Object {
           (Test-Path (Join-Path $_.FullName "source")) -or 
           (Test-Path (Join-Path $_.FullName "extras"))
@@ -161,116 +158,102 @@ jobs:
           Move-Item -Path $tempExtract -Destination "C:\pin" -Force
         }
         
-        # Create output directory
         New-Item -ItemType Directory -Path "C:\pintool" -Force | Out-Null
         Write-Host "Created C:\pintool for output artifacts"
 
     - name: Create MSVC compatibility header
       shell: powershell
       run: |
-        # Create include directory
         New-Item -ItemType Directory -Path "include" -Force | Out-Null
         
-        # Create comprehensive MSVC compatibility header
-        @'
-#ifndef MSVC_COMPAT_H
-#define MSVC_COMPAT_H
-
-// MSVC compatibility header for Intel Pin tools
-// Fixes incompatibilities between Pin's Linux-based CRT and MSVC
-
-#ifdef _MSC_VER
-
-// Disable specific MSVC warnings
-#pragma warning(disable: 4530) // C++ exception handler used, but unwind semantics are not enabled
-#pragma warning(disable: 4577) // 'noexcept' used with no exception handling mode specified
-#pragma warning(disable: 4091) // 'typedef ': ignored on left of '' when no variable is declared
-
-// Include standard Windows headers first
-#include <windows.h>
-#include <stddef.h>
-#include <stdint.h>
-
-// Define GCC-style keywords for MSVC
-#ifndef __signed__
-#define __signed__ signed
-#endif
-
-#ifndef __inline__
-#define __inline__ __inline
-#endif
-
-#ifndef __attribute__
-#define __attribute__(x)
-#endif
-
-// Forward declare types that Pin's CRT expects
-typedef unsigned int wint_t;
-typedef int wctype_t;
-typedef int wctrans_t;
-typedef unsigned long long dev_t;
-
-// Standard C library function declarations (prevent Pin CRT from declaring them)
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-// Character classification functions
-int isalnum(int c);
-int isalpha(int c);
-int iscntrl(int c);
-int isdigit(int c);
-int isgraph(int c);
-int islower(int c);
-int isprint(int c);
-int ispunct(int c);
-int isspace(int c);
-int isupper(int c);
-int isxdigit(int c);
-int tolower(int c);
-int toupper(int c);
-
-// Wide character functions
-wint_t btowc(int c);
-wint_t fgetwc(FILE* stream);
-wint_t fputwc(wint_t wc, FILE* stream);
-wint_t getwc(FILE* stream);
-wint_t getwchar(void);
-wint_t putwc(wint_t wc, FILE* stream);
-wint_t putwchar(wint_t wc);
-wint_t towlower(wint_t wc);
-wint_t towupper(wint_t wc);
-wint_t ungetwc(wint_t wc, FILE* stream);
-
-#ifdef __cplusplus
-}
-#endif
-
-// Prevent Pin's STLport from trying to use non-existent functions
-#define _STLP_NO_WCHAR_T
-#define _STLP_NO_NATIVE_WIDE_STREAMS
-
-// Make sure std:: namespace has these functions
-namespace std {
-    using ::tolower;
-    using ::toupper;
-    using ::isalnum;
-    using ::isalpha;
-    using ::iscntrl;
-    using ::isdigit;
-    using ::isgraph;
-    using ::islower;
-    using ::isprint;
-    using ::ispunct;
-    using ::isspace;
-    using ::isupper;
-    using ::isxdigit;
-}
-
-#endif // _MSC_VER
-#endif // MSVC_COMPAT_H
-'@ | Out-File -FilePath "include\msvc_compat.h" -Encoding ASCII
+        $headerContent = @"
+        #ifndef MSVC_COMPAT_H
+        #define MSVC_COMPAT_H
         
+        #ifdef _MSC_VER
+        
+        #pragma warning(disable: 4530)
+        #pragma warning(disable: 4577)
+        #pragma warning(disable: 4091)
+        
+        #include <windows.h>
+        #include <stddef.h>
+        #include <stdint.h>
+        
+        #ifndef __signed__
+        #define __signed__ signed
+        #endif
+        
+        #ifndef __inline__
+        #define __inline__ __inline
+        #endif
+        
+        #ifndef __attribute__
+        #define __attribute__(x)
+        #endif
+        
+        typedef unsigned int wint_t;
+        typedef int wctype_t;
+        typedef int wctrans_t;
+        typedef unsigned long long dev_t;
+        
+        #ifdef __cplusplus
+        extern "C" {
+        #endif
+        
+        int isalnum(int c);
+        int isalpha(int c);
+        int iscntrl(int c);
+        int isdigit(int c);
+        int isgraph(int c);
+        int islower(int c);
+        int isprint(int c);
+        int ispunct(int c);
+        int isspace(int c);
+        int isupper(int c);
+        int isxdigit(int c);
+        int tolower(int c);
+        int toupper(int c);
+        
+        wint_t btowc(int c);
+        wint_t fgetwc(FILE* stream);
+        wint_t fputwc(wint_t wc, FILE* stream);
+        wint_t getwc(FILE* stream);
+        wint_t getwchar(void);
+        wint_t putwc(wint_t wc, FILE* stream);
+        wint_t putwchar(wint_t wc);
+        wint_t towlower(wint_t wc);
+        wint_t towupper(wint_t wc);
+        wint_t ungetwc(wint_t wc, FILE* stream);
+        
+        #ifdef __cplusplus
+        }
+        #endif
+        
+        #define _STLP_NO_WCHAR_T
+        #define _STLP_NO_NATIVE_WIDE_STREAMS
+        
+        namespace std {
+            using ::tolower;
+            using ::toupper;
+            using ::isalnum;
+            using ::isalpha;
+            using ::iscntrl;
+            using ::isdigit;
+            using ::isgraph;
+            using ::islower;
+            using ::isprint;
+            using ::ispunct;
+            using ::isspace;
+            using ::isupper;
+            using ::isxdigit;
+        }
+        
+        #endif
+        #endif
+        "@
+        
+        $headerContent | Out-File -FilePath "include\msvc_compat.h" -Encoding ASCII
         Write-Host "Created include/msvc_compat.h"
 
     - name: Build projects
@@ -324,7 +307,10 @@ namespace std {
       shell: powershell
       run: |
         Write-Host "=== MSBuild logs ==="
-        Get-ChildItem -Path msbuild_logs -File | ForEach-Object { Write-Host "--- $_.Name ---"; Get-Content $_.FullName -TotalCount 200 }
+        Get-ChildItem -Path msbuild_logs -File | ForEach-Object { 
+          Write-Host "--- $($_.Name) ---"
+          Get-Content $_.FullName -TotalCount 200 
+        }
 
     - name: Find and copy build outputs
       shell: powershell
@@ -351,7 +337,7 @@ namespace std {
       run: |
         $exe = Get-ChildItem -Path C:\pintool -Filter UnSafengine64.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $exe) { 
-          Write-Error 'UnSafengine64.exe not found in C:\pintool — build probably failed'
+          Write-Error 'UnSafengine64.exe not found in C:\pintool - build probably failed'
           exit 1 
         }
         Write-Host "Found executable: $($exe.FullName)"
