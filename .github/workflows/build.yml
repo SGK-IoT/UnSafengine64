@@ -17,18 +17,26 @@ jobs:
     - name: Setup MSBuild
       uses: microsoft/setup-msbuild@v1.1
 
-    - name: Download Intel Pin (if not in repo)
+    - name: Download Intel Pin 3.30 (MSVC Compatible)
       shell: powershell
       run: |
-        if (Test-Path "pin.zip") {
-          Write-Host "[OK] pin.zip already exists in repository"
-        } else {
-          Write-Host "[INFO] pin.zip not found in repository, downloading..."
-          # Download Intel Pin - you may need to update this URL to the correct version
-          $pinUrl = "https://software.intel.com/sites/landingpage/pintool/downloads/pin-3.30-98830-g1d7b601b3-msvc-windows.zip"
-          Write-Host "Downloading Pin from: $pinUrl"
+        Write-Host "=== Downloading Intel Pin 3.30 (MSVC Compatible) ==="
+        
+        $pinUrl = "https://software.intel.com/sites/landingpage/pintool/downloads/pin-3.30-98830-g1d7b601b3-msvc-windows.zip"
+        Write-Host "Downloading from: $pinUrl"
+        Write-Host "This may take a few minutes (40MB download)..."
+        
+        try {
           Invoke-WebRequest -Uri $pinUrl -OutFile "pin.zip" -UseBasicParsing
-          Write-Host "[OK] Downloaded pin.zip ($(Get-Item pin.zip | Select-Object -ExpandProperty Length) bytes)"
+          $fileInfo = Get-Item "pin.zip"
+          Write-Host "[OK] Downloaded pin.zip ($([math]::Round($fileInfo.Length/1MB, 2)) MB)"
+        } catch {
+          Write-Host "[ERROR] Failed to download Pin: $_"
+          Write-Host ""
+          Write-Host "Alternative download locations:"
+          Write-Host "1. https://www.intel.com/content/www/us/en/developer/articles/tool/pin-a-binary-instrumentation-tool-downloads.html"
+          Write-Host "2. Direct: https://software.intel.com/sites/landingpage/pintool/downloads/pin-3.30-98830-g1d7b601b3-msvc-windows.zip"
+          exit 1
         }
 
     - name: Detect installed Windows 10 SDK
