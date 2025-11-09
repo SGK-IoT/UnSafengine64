@@ -31,12 +31,10 @@ jobs:
           if ('${{ env.INSTALL_SDK }}' -eq 'true') {
             Write-Host 'INSTALL_SDK is true — attempting to download and install Windows SDK'
             Write-Host "Target SDK version: $env:TARGET_SDK_VERSION"
-            # Download and run installer (example bootstrap URL — replace with official installer if desired)
             $installer = "WindowsSDKInstaller.exe"
             $url = "https://download.microsoft.com/download/9/6/6/966E0A2C-7F1F-44B3-8C5A-6F9F8E6A8B4D/WinSDKSetup.exe"
             Invoke-WebRequest -Uri $url -OutFile $installer
             Start-Process -FilePath .\$installer -ArgumentList '/quiet','/norestart' -Wait
-            # Re-detect SDK
             $sdkEntry2 = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Directory | Sort-Object Name -Descending | Select-Object -First 1
             if ($sdkEntry2) { "WINSDK=$($sdkEntry2.Name)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append; Write-Host "Installed and detected SDK: $($sdkEntry2.Name)" }
             else { Write-Error 'SDK installation did not expose an Include folder under the expected path.'; exit 1 }
@@ -52,27 +50,46 @@ jobs:
         mkdir C:\pintool -ErrorAction SilentlyContinue
         Expand-Archive -Path pin.zip -DestinationPath C:\pintool -Force
 
-    - name: Build (use detected SDK if present)
+    - name: Build (capture MSBuild logs)
       shell: powershell
       run: |
         $sdk = $env:WINSDK
+        $logDir = "$PWD\msbuild_logs"
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
         if ($sdk -and $sdk.Trim().Length -gt 0) {
           Write-Host "Building using WindowsTargetPlatformVersion=$sdk"
-          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64.vcxproj
-          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64CUI.vcxproj
+          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64.log;Verbosity=normal
+          msbuild /p:Configuration=Release /p:Platform=x64 /p:WindowsTargetPlatformVersion=$sdk Unsafengine64CUI.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64CUI.log;Verbosity=normal
         } else {
-          Write-Host 'No SDK specified - attempting build without WindowsTargetPlatformVersion'
-          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64.vcxproj
-          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64CUI.vcxproj
+          Write-Host "No SDK specified — attempting build without WindowsTargetPlatformVersion"
+          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64.log;Verbosity=normal
+          msbuild /p:Configuration=Release /p:Platform=x64 Unsafengine64CUI.vcxproj /fileloggerparameters:LogFile=$logDir\Unsafengine64CUI.log;Verbosity=normal
         }
 
-    - name: Find and copy build outputs to pintool
+    - name: Show MSBuild logs
       shell: powershell
       run: |
-        $dll = Get-ChildItem -Recurse -Filter UnSafengine64.dll | Select-Object -First 1
-        $exe = Get-ChildItem -Recurse -Filter UnSafengine64.exe | Select-Object -First 1
-        if ($dll) { Copy-Item -Path $dll.FullName -Destination C:\pintool -Force; Write-Host "Copied $($dll.FullName)" }
-        if ($exe) { Copy-Item -Path $exe.FullName -Destination C:\pintool -Force; Write-Host "Copied $($exe.FullName)" }
+        Write-Host "=== MSBuild logs ==="
+        Get-ChildItem -Path msbuild_logs -File | ForEach-Object { Write-Host "--- $_.Name ---"; Get-Content $_.FullName -TotalCount 200 }
+
+    - name: Find and copy build outputs to pintool (robust)
+      shell: powershell
+      run: |
+        Write-Host "Searching for build outputs..."
+        $patterns = @('UnSafengine64.exe','UnSafengine64.dll')
+        foreach ($p in $patterns) {
+          $found = Get-ChildItem -Path $PWD -Recurse -Filter $p -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($found) { Copy-Item -Path $found.FullName -Destination C:\pintool -Force; Write-Host "Copied $($found.FullName) to C:\pintool" }
+          else { Write-Host "Not found: $p" }
+        }
+        Write-Host "Contents of C:\pintool:"; Get-ChildItem -Path C:\pintool -Recurse | Select-Object FullName, Length
+
+    - name: Ensure UnSafengine64.exe exists before trace
+      shell: powershell
+      run: |
+        $exe = Get-ChildItem -Path C:\pintool -Filter UnSafengine64.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $exe) { Write-Error 'UnSafengine64.exe not found in C:\pintool — build probably failed or output placed elsewhere. See msbuild logs above.'; exit 1 }
+        else { Write-Host "Found executable: $($exe.FullName)" }
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -84,4 +101,5 @@ jobs:
       shell: powershell
       run: |
         cd C:\pintool
+        Write-Host "Running: .\UnSafengine64.exe -trace -log trace.log .\Skin_Injector.exe"
         .\UnSafengine64.exe -trace -log trace.log .\Skin_Injector.exe
